@@ -1,4 +1,5 @@
 import os
+import shlex
 import subprocess
 import sys
 
@@ -195,3 +196,16 @@ def test_inodes_and_reserved(root):
     fs.mountpoint = "/"
     r, = findings(space.reserved, ctx)
     assert r.risk == INFO and r.fix == []
+
+
+def test_active_log_fix_preserves_the_full_path(root, monkeypatch):
+    monkeypatch.setattr(logs, "BIG_ACTIVE", 20000)
+    paths = ["/var/log/my app/current.log", "/var/log/team's app/current.log",
+             "/var/log/app[1].log"]
+    for path in paths:
+        root.write(path, size=50000)
+    found = findings(logs.run, make_ctx(root.system()))
+    assert {f.key for f in found} == set(paths)
+    for f in found:
+        assert shlex.split(f.fix[0]) == ["sudo", "truncate", "-s", "0", f.key]
+        assert f.fix[0].endswith(shlex.quote(f.key))

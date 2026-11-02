@@ -2,6 +2,7 @@
 
 import os
 import re
+import shlex
 import stat as statmod
 
 from whyfull.checks import check
@@ -76,6 +77,6 @@ def run(ctx):
             detail=("An active log this large usually means log rotation isn't set up for it. "
                     "Truncate it rather than deleting it: deleting a file a service still writes "
                     "to doesn't free the space. Then add a logrotate rule."),
-            fix=["sudo truncate -s 0 %s" % path,
+            fix=["sudo truncate -s 0 %s" % shlex.quote(path),
                  "# then check /etc/logrotate.d/ has a rule covering %s" % os.path.dirname(path)],
         )
