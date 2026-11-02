@@ -7,7 +7,7 @@ import pytest
 
 from conftest import make_ctx
 
-from whyfull.checks import containers, crashes, deleted_open, journald, kernels, logs, packages, snaps
+from whyfull.checks import containers, crashes, deleted_open, flatpak, journald, kernels, logs, packages, snaps
 from whyfull.checks import mysql, postgresql, space, tmpfiles, usercaches
 from whyfull.model import CAUTION, INFO, REVIEW, SAFE, Filesystem
 from whyfull.system import System
@@ -178,6 +178,17 @@ def test_snaps(root, monkeypatch):
         "core22  20241001  1621  latest/stable  canonical✓  base\n")
     f, = findings(snaps.run, make_ctx(root.system()))
     assert f.fix[0] == "sudo snap remove core22 --revision=1564"
+    assert f.risk == SAFE
+
+
+def test_flatpak_runtimes_system_and_per_user(root, monkeypatch):
+    monkeypatch.setattr(flatpak, "MIN_BYTES", 20000)
+    root.commands[("flatpak", "--version")] = "Flatpak 1.14.6\n"
+    root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x", size=16000)
+    root.write("/home/alice/.local/share/flatpak/runtime/org.kde.Platform/y", size=12000)
+    f, = findings(flatpak.run, make_ctx(root.system()))
+    assert f.fix == ["flatpak uninstall --unused -y",
+                     "sudo -u alice -H sh -c 'flatpak uninstall --user --unused -y'"]
     assert f.risk == SAFE
 
 
