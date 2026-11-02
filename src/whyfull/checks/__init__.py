@@ -24,6 +24,7 @@ MODULES = [
     "packages",
     "kernels",
     "snaps",
+    "flatpak",
     "crashes",
     "tmpfiles",
     "usercaches",
