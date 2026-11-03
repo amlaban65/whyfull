@@ -1,10 +1,11 @@
 import os
+import shlex
 import subprocess
 import sys
 
 from conftest import make_ctx
 
-from whyfull.checks import containers, crashes, deleted_open, flatpak, journald, kernels, logs, packages, snaps
+from whyfull.checks import containers, crashes, deleted_open, flatpak, journald, kernels, logs, mysql, packages, snaps
 from whyfull.checks import space, tmpfiles, usercaches
 from whyfull.model import CAUTION, INFO, REVIEW, SAFE, Filesystem
 from whyfull.system import System
@@ -132,10 +133,12 @@ def test_snaps(root, monkeypatch):
 def test_flatpak_runtimes_system_and_per_user(root, monkeypatch):
     monkeypatch.setattr(flatpak, "MIN_BYTES", 20000)
     root.commands[("flatpak", "--version")] = "Flatpak 1.14.6\n"
-    root.commands[("flatpak", "--system", "list", "--app", "--columns=runtime")] = (
-        "Runtime\norg.gnome.Platform/x86_64/46\n")
-    root.commands[("sudo", "-u", "alice", "-H", "flatpak", "--user", "list", "--app", "--columns=runtime")] = (
-        "Runtime\norg.kde.Platform/x86_64/6.8\norg.shared.Platform/x86_64/1\n")
+    root.write("/var/lib/flatpak/app/org.example.System/current/active/metadata",
+               "[Application]\nname=System app\nruntime=org.gnome.Platform/x86_64/46\n")
+    root.write("/home/alice/.local/share/flatpak/app/org.example.User/current/active/metadata",
+               "[Application]\nname=User app\nruntime=org.kde.Platform/x86_64/6.8\n")
+    root.write("/home/alice/.local/share/flatpak/app/org.example.Shared/current/active/metadata",
+               "[Application]\nname=Shared app\nruntime=org.shared.Platform/x86_64/1\n")
     root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x", size=16000)  # referenced: not reclaimable
     root.write("/var/lib/flatpak/runtime/org.freedesktop.Platform/x", size=16000)
     root.write("/var/lib/flatpak/runtime/org.gtk.Gtk3theme/x", size=8000)
@@ -153,6 +156,19 @@ def test_flatpak_runtimes_system_and_per_user(root, monkeypatch):
         + ctx.size("/var/lib/flatpak/runtime/org.gtk.Gtk3theme")
         + ctx.size("/home/alice/.local/share/flatpak/runtime/org.freedesktop.Platform")
     )  # only unreferenced runtime IDs are counted
+    assert root.commands == {("flatpak", "--version"): "Flatpak 1.14.6\n"}
+
+
+def test_flatpak_not_installed(root):
+    root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x", size=50000)
+    assert findings(flatpak.run, make_ctx(root.system())) == []
+
+
+def test_flatpak_below_floor(root, monkeypatch):
+    monkeypatch.setattr(flatpak, "MIN_BYTES", 20000)
+    root.commands[("flatpak", "--version")] = "Flatpak 1.14.6\n"
+    root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x", size=10000)
+    assert findings(flatpak.run, make_ctx(root.system())) == []
 
 
 def test_crashes(root, monkeypatch):
@@ -169,6 +185,24 @@ def test_tmp_only_counts_old_files(root, monkeypatch):
     f, = findings(tmpfiles.run, make_ctx(root.system()))
     assert f.evidence[0].endswith("/tmp/old/build.tar")
     assert f.bytes < 50000
+
+
+def test_torch_cache_counts_only_hub(root, monkeypatch):
+    monkeypatch.setattr(usercaches, "MIN_BYTES", 20000)
+    root.write("/home/alice/.cache/torch/hub/checkpoints/model.pt", size=50000)
+    root.write("/home/alice/.cache/torch/extensions/build.so", size=100000)
+    ctx = make_ctx(root.system())
+    found = [f for f in usercaches.run(ctx) if f.key == "PyTorch hub cache"]
+    assert len(found) == 1
+    assert found[0].bytes == ctx.size("/home/alice/.cache/torch/hub")
+    assert found[0].fix == ["sudo -u alice -H sh -c 'rm -rf ~/.cache/torch/hub'"]
+
+
+def test_torch_cache_ignores_large_non_hub_cache(root, monkeypatch):
+    monkeypatch.setattr(usercaches, "MIN_BYTES", 20000)
+    root.write("/home/alice/.cache/torch/extensions/build.so", size=100000)
+    found = list(usercaches.run(make_ctx(root.system())))
+    assert not any(f.key == "PyTorch hub cache" for f in found)
 
 
 def test_user_caches_grouped_across_users(root, monkeypatch):
@@ -221,3 +255,59 @@ def test_inodes_and_reserved(root):
     fs.mountpoint = "/"
     r, = findings(space.reserved, ctx)
     assert r.risk == INFO and r.fix == []
+
+
+def test_active_log_fix_preserves_the_full_path(root, monkeypatch):
+    monkeypatch.setattr(logs, "BIG_ACTIVE", 20000)
+    paths = ["/var/log/my app/current.log", "/var/log/team's app/current.log",
+             "/var/log/app[1].log"]
+    for path in paths:
+        root.write(path, size=50000)
+    found = findings(logs.run, make_ctx(root.system()))
+    assert {f.key for f in found} == set(paths)
+    for f in found:
+        assert shlex.split(f.fix[0]) == ["sudo", "truncate", "-s", "0", f.key]
+        assert f.fix[0].endswith(shlex.quote(f.key))
+
+
+def test_mysql_binary_logs_only(root, monkeypatch):
+    monkeypatch.setattr(mysql, "MIN_BYTES", 20000)
+    paths = ["/var/lib/mysql/binlog.000001", "/var/lib/mysql/mysql-bin.000002"]
+    for path in paths:
+        root.write(path, size=16000)
+    for name in ["binlog.index", "binlog.1.bak", "binlog.000003x", "ibdata1", "relay.000001"]:
+        root.write("/var/lib/mysql/" + name, size=50000)
+    root.mkdir("/var/lib/mysql/binlog.000004")
+    os.symlink(root.local(paths[0]), root.local("/var/lib/mysql/binlog.000005"))
+    system = root.system()
+    f, = findings(mysql.run, make_ctx(system))
+    assert f.bytes == sum(system.lstat(path).st_blocks * 512 for path in paths)
+    assert f.evidence == paths
+    assert f.risk == REVIEW
+    assert f.dev == system.lstat(paths[0]).st_dev
+    assert 'PURGE BINARY LOGS' in f.fix[1]
+    assert all("rm " not in line for line in f.fix)
+
+
+def test_mysql_skips_missing_and_small_logs(root, monkeypatch):
+    monkeypatch.setattr(mysql, "MIN_BYTES", 20000)
+    assert findings(mysql.run, make_ctx(root.system())) == []
+    root.write("/var/lib/mysqld/mysql-bin.000001", size=1000)
+    assert findings(mysql.run, make_ctx(root.system())) == []
+
+
+def test_mysql_reports_alternate_data_directory(root, monkeypatch):
+    monkeypatch.setattr(mysql, "MIN_BYTES", 20000)
+    root.write("/var/lib/mysqld/mariadb-bin.000001", size=50000)
+    f, = findings(mysql.run, make_ctx(root.system()))
+    assert f.key == "/var/lib/mysqld"
+
+
+def test_mysql_respects_target_filesystem(root, monkeypatch):
+    monkeypatch.setattr(mysql, "MIN_BYTES", 20000)
+    root.write("/var/lib/mysql/binlog.000001", size=50000)
+    root.mounts.append(("/var/lib/mysql", "ext4", "/dev/sdb1"))
+    system = root.system()
+    assert findings(mysql.run, make_ctx(system)) == []
+    f, = findings(mysql.run, make_ctx(system, mountpoint="/var/lib/mysql"))
+    assert f.dev == system.lstat("/var/lib/mysql").st_dev

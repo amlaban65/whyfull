@@ -23,7 +23,7 @@ CACHES = [
     (".gradle/caches", "Gradle caches", "rm -rf ~/.gradle/caches", SAFE),
     (".cache/huggingface", "Hugging Face models and datasets",
      "huggingface-cli delete-cache  # interactive: pick what to remove", REVIEW),
-    (".cache/torch", "PyTorch hub cache", "rm -rf ~/.cache/torch/hub", REVIEW),
+    (".cache/torch/hub", "PyTorch hub cache", "rm -rf ~/.cache/torch/hub", REVIEW),
     (".conda/pkgs", "conda package cache", "conda clean --all -y", SAFE),
     ("miniconda3/pkgs", "conda package cache", "conda clean --all -y", SAFE),
     ("anaconda3/pkgs", "conda package cache", "conda clean --all -y", SAFE),

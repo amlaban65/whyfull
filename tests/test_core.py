@@ -97,6 +97,115 @@ def test_analyze_picks_full_filesystems(root):
     assert not report.all_clear
 
 
+def test_scan_excludes_paths_without_entering_them(tmp_path, monkeypatch):
+    ignored = tmp_path / "data"
+    (ignored / "deep").mkdir(parents=True)
+    (ignored / "deep" / "large").write_bytes(b"x" * 65536)
+    sibling = tmp_path / "database"
+    sibling.mkdir()
+    kept = sibling / "kept"
+    kept.write_bytes(b"x" * 8192)
+    omitted_file = tmp_path / "skip-file"
+    omitted_file.write_bytes(b"x" * 16384)
+    real_scandir = os.scandir
+    visited = []
+
+    def scandir(path):
+        visited.append(path)
+        assert os.path.normpath(path) != str(ignored)
+        assert not os.path.normpath(path).startswith(str(ignored) + os.sep)
+        return real_scandir(path)
+
+    monkeypatch.setattr(os, "scandir", scandir)
+    tree = scan(str(tmp_path), os.stat(str(tmp_path)).st_dev,
+                exclude=[str(ignored) + "/./", str(ignored), str(omitted_file)])
+    assert tree.complete
+    assert tree.files == 1
+    assert tree.total == du(str(kept)).bytes
+    assert tree.sizes[str(tmp_path)] == tree.total
+    assert str(ignored) not in tree.sizes
+    assert str(sibling) in visited
+    assert all(p != str(ignored) for _, p in tree.crowded)
+
+
+@pytest.mark.parametrize("ancestor", [False, True])
+def test_scan_can_exclude_root_or_its_ancestor(tmp_path, monkeypatch, ancestor):
+    root_path = tmp_path / "mount"
+    root_path.mkdir()
+
+    def no_scan(path):
+        pytest.fail("entered excluded root: %s" % path)
+
+    monkeypatch.setattr(os, "scandir", no_scan)
+    excluded = tmp_path if ancestor else root_path
+    tree = scan(str(root_path), os.stat(str(root_path)).st_dev, exclude=[str(excluded)])
+    assert tree.complete and tree.total == tree.files == 0
+    assert tree.sizes == {} and tree.crowded == []
+
+
+def test_scan_relative_and_missing_exclusions(tmp_path, monkeypatch):
+    (tmp_path / "skip").mkdir()
+    (tmp_path / "skip" / "data").write_bytes(b"x" * 8192)
+    (tmp_path / "keep").write_bytes(b"x" * 4096)
+    monkeypatch.chdir(str(tmp_path))
+    tree = scan(str(tmp_path), os.stat(str(tmp_path)).st_dev, exclude=["skip/", "missing"])
+    assert tree.files == 1
+    assert tree.total == du(str(tmp_path / "keep")).bytes
+
+
+def test_analyze_exclusions_avoid_false_unexplained_space(root, monkeypatch):
+    root.write("/data/large", size=65536)
+    system = root.system()
+    monkeypatch.setattr("whyfull.analyze.load", lambda: [])
+    baseline = analyze(system, paths=["/"])
+    assert any(f.check == "unexplained" for f in baseline.targets[0].findings)
+    report = analyze(system, paths=["/"], exclude=["/data"])
+    target = report.targets[0]
+    assert target.tree.total < baseline.targets[0].tree.total
+    assert root.local("/data") not in target.tree.sizes
+    assert not any(f.check == "unexplained" for f in target.findings)
+    assert any("unexplained-space check is skipped" in n for n in report.notes)
+    assert any("/data" in n for n in json.loads(as_json(report, None))["notes"])
+    assert "unexplained-space check is skipped" in text(report, color=False)
+    assert "unexplained-space check is skipped" in markdown(report)
+
+
+def test_analyze_exclusions_do_not_skip_targeted_checks(root, monkeypatch):
+    root.write("/data/large", size=65536)
+    measured = []
+
+    def check_excluded(ctx):
+        measured.append(ctx.size("/data"))
+
+    monkeypatch.setattr("whyfull.analyze.load", lambda: [Check("probe", "Probe", check_excluded)])
+    analyze(root.system(), paths=["/"], exclude=["/data"])
+    assert measured[0] >= 65536
+
+
+def test_exclusions_with_no_scan_do_not_claim_scan_was_skipped(root, monkeypatch):
+    monkeypatch.setattr("whyfull.analyze.load", lambda: [])
+    report = analyze(root.system(), paths=["/"], do_scan=False, exclude=["/data"])
+    assert report.targets[0].tree is None
+    assert not report.notes
+
+
+def test_cli_passes_repeated_exclusions(root, monkeypatch, capsys):
+    system = root.system()
+    report = analyze(system, paths=["/"], do_scan=False)
+    received = {}
+
+    def fake_analyze(system, **kwargs):
+        received.update(kwargs)
+        return report
+
+    monkeypatch.setattr(cli, "analyze", fake_analyze)
+    assert cli.main(["--root", root.path, "--json", "--exclude", "/data",
+                     "--exclude", "/media", "--no-scan"]) == 0
+    assert received["exclude"] == ["/data", "/media"]
+    assert received["do_scan"] is False
+    assert "targets" in json.loads(capsys.readouterr().out)
+
+
 def test_analyze_all_clear_shows_root(root):
     root.set_usage("/", used=10 * GB)
     report = analyze(root.system(), scan_seconds=10)

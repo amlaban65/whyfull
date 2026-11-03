@@ -20,14 +20,19 @@ MODULES = [
     "space",
     "journald",
     "logs",
+    "podlogs",
     "containers",
+    "cri",
+    "podman",
     "packages",
     "kernels",
     "snaps",
     "flatpak",
     "crashes",
+    "mysql",
     "tmpfiles",
     "usercaches",
+    "android",
 ]
 
 

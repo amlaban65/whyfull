@@ -46,6 +46,8 @@ def build_parser():
     p.add_argument("--scan-time", type=float, default=30, metavar="SEC",
                    help="time limit for scanning the whole filesystem, 0 for none (default %(default)s)")
     p.add_argument("--no-scan", action="store_true", help="skip the full scan; run only the targeted checks")
+    p.add_argument("--exclude", action="append", default=[], metavar="PATH",
+                   help="omit PATH from the full scan (repeatable); targeted checks still run there")
     p.add_argument("--only", metavar="CHECKS", help="comma-separated checks to run (see --list-checks)")
     p.add_argument("--skip", metavar="CHECKS", help="comma-separated checks to skip")
     p.add_argument("--list-checks", action="store_true", help="list the checks and exit")
@@ -92,7 +94,7 @@ def main(argv=None):
     try:
         report = analyze(system, paths=args.paths or None, threshold=threshold,
                          scan_seconds=args.scan_time or None, only=only, skip=skip,
-                         do_scan=not args.no_scan)
+                         do_scan=not args.no_scan, exclude=args.exclude)
     except ValueError as e:
         print("whyfull: %s" % e, file=sys.stderr)
         return 2

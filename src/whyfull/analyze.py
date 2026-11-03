@@ -78,7 +78,7 @@ def choose_targets(system, all_fs, paths, threshold):
 
 
 def analyze(system, paths=None, threshold=DEFAULT_THRESHOLD, scan_seconds=30, check_seconds=60,
-            only=None, skip=None, do_scan=True):
+            only=None, skip=None, do_scan=True, exclude=None):
     report = Report()
     report.threshold = threshold
     all_fs = filesystems(system)
@@ -111,9 +111,15 @@ def analyze(system, paths=None, threshold=DEFAULT_THRESHOLD, scan_seconds=30, ch
     if ctx.budget.hit:
         ctx.note("Some checks hit their time limit; sizes may be understated.")
 
+    excluded = [system.path(os.path.abspath(p) if system.root == "/" else p) for p in (exclude or [])]
+    if do_scan and excluded:
+        ctx.note("Excluded paths are omitted from scan totals and largest directories: %s. "
+                 "The unexplained-space check is skipped because the scan omits these paths; "
+                 "targeted checks still run there." % ", ".join(exclude))
+
     for t in report.targets:
         if do_scan:
-            t.tree = scan(system.path(t.fs.mountpoint), t.fs.dev, Budget(scan_seconds))
+            t.tree = scan(system.path(t.fs.mountpoint), t.fs.dev, Budget(scan_seconds), exclude=excluded)
             if not t.tree.complete:
                 ctx.note("The scan of %s stopped at its time limit; raise it with --scan-time." % t.fs.mountpoint)
             if t.tree.denied and not system.is_root:
@@ -121,7 +127,7 @@ def analyze(system, paths=None, threshold=DEFAULT_THRESHOLD, scan_seconds=30, ch
                          % (t.tree.denied, t.fs.mountpoint))
             t.largest = t.largest_dirs(system)
             t.crowded = [(n, system.display(p)) for n, p in t.tree.crowded]
-            gap = unexplained(system, t, ctx.deleted_open_bytes.get(t.fs.dev, 0), all_fs)
+            gap = None if excluded else unexplained(system, t, ctx.deleted_open_bytes.get(t.fs.dev, 0), all_fs)
             if gap is not None:
                 t.findings.append(gap)
         t.findings.sort(key=lambda f: (-f.priority, -f.bytes))

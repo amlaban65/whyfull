@@ -9,47 +9,60 @@ from whyfull.units import human
 MIN_BYTES = 200 * 10 ** 6
 SYSTEM = "/var/lib/flatpak/runtime"
 USER_RUNTIME = ".local/share/flatpak/runtime"
+SYSTEM_APPS = "/var/lib/flatpak/app"
+USER_APPS = ".local/share/flatpak/app"
 
 
-def app_runtimes(system, user):
-    """Return runtime IDs referenced by apps in one installation, or None on failure."""
-    if user is None:
-        command = ["flatpak", "--system", "list", "--app", "--columns=runtime"]
-    elif user == "root":
-        command = ["flatpak", "--user", "list", "--app", "--columns=runtime"]
-    else:
-        command = ["sudo", "-u", user, "-H", "flatpak", "--user", "list", "--app", "--columns=runtime"]
-    output = system.run(command)
-    if output is None:
-        return None
-    lines = output.splitlines()
-    if lines and lines[0].strip().lower() == "runtime":
-        lines = lines[1:]
-    return set(line.strip().split("/", 1)[0] for line in lines if line.strip())
+def app_runtimes(system, apps_path):
+    """Return runtime IDs read from installed app metadata, or None if it is incomplete."""
+    if not system.exists(apps_path):
+        return set()
+    used = set()
+    for app in system.listdir(apps_path):
+        metadata = os.path.join(apps_path, app, "current", "active", "metadata")
+        if not system.exists(metadata):
+            return None
+        text = system.read_text(metadata)
+        if text is None:
+            return None
+        in_application = False
+        for line in text.splitlines():
+            line = line.strip()
+            if line.startswith("[") and line.endswith("]"):
+                in_application = line[1:-1] == "Application"
+            elif in_application and "=" in line:
+                key, value = line.split("=", 1)
+                if key.strip() == "runtime" and value.strip():
+                    used.add(value.strip().split("/", 1)[0])
+                    break
+    return used
 
 
 @check("flatpak", "Unused Flatpak runtimes")
 def run(ctx):
     if not ctx.system.has("flatpak"):
         return
-    places = []  # (user or None for the system installation, runtime directory)
-    if ctx.system.exists(SYSTEM):
-        places.append((None, SYSTEM))
+    places = []  # (user or None for the system installation, runtime directory, apps directory)
+    if ctx.system.exists(SYSTEM) or ctx.system.exists(SYSTEM_APPS):
+        places.append((None, SYSTEM, SYSTEM_APPS))
     for user, home in ctx.system.users():
-        places.append((user, os.path.join(home, USER_RUNTIME)))
+        runtime_path = os.path.join(home, USER_RUNTIME)
+        apps_path = os.path.join(home, USER_APPS)
+        if ctx.system.exists(runtime_path) or ctx.system.exists(apps_path):
+            places.append((user, runtime_path, apps_path))
 
-    # An app in a per-user installation may use a runtime from the system
-    # installation. Take the union across installations before estimating any
-    # directory, and fail closed if any user's app list cannot be read.
+    # An app in one installation may use a runtime from another. Read only the
+    # metadata files and take the union before estimating reclaimable space.
     used = set()
-    for user, _path in places:
-        runtimes = app_runtimes(ctx.system, user)
+    for _user, _path, apps_path in places:
+        runtimes = app_runtimes(ctx.system, apps_path)
         if runtimes is None:
+            ctx.note("Could not read Flatpak app metadata; unused-runtime estimates were skipped.")
             return
         used.update(runtimes)
 
     groups = {}  # dev -> [total bytes, [(size, user, path)]]
-    for user, path in places:
+    for user, path, _apps_path in places:
         if not ctx.system.exists(path) or not ctx.on_target(path):
             continue
         for runtime in ctx.system.listdir(path):

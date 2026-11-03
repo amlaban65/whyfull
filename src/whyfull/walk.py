@@ -103,10 +103,21 @@ class Tree(object):
         self.crowded = []  # (entry count, local dir path), most entries first
 
 
-def scan(local_root, dev, budget=None, max_depth=3, crowded=10):
+def scan(local_root, dev, budget=None, max_depth=3, crowded=10, exclude=None):
     """Walk a filesystem from its mountpoint, recording directory sizes down to
-    max_depth and the directories with the most entries (for inode trouble)."""
+    max_depth and the directories with the most entries (for inode trouble).
+    exclude contains local paths to omit, including their entire subtrees.
+    """
     tree = Tree()
+    excluded = {os.path.normcase(os.path.abspath(p)) for p in (exclude or [])}
+    prefixes = tuple(p.rstrip(os.sep) + os.sep for p in excluded)
+
+    def is_excluded(path):
+        if not excluded:
+            return False
+        path = os.path.normcase(os.path.abspath(path))
+        return path in excluded or path.startswith(prefixes)
+
     seen = set()
     buckets = {}  # nearest recorded ancestor -> bytes directly attributed
     heap = []  # min-heap of (entries, path)
@@ -117,6 +128,8 @@ def scan(local_root, dev, budget=None, max_depth=3, crowded=10):
             tree.complete = False
             break
         path, depth, bucket = stack.pop()
+        if is_excluded(path):
+            continue
         try:
             it = os.scandir(path)
         except PermissionError:
@@ -128,6 +141,8 @@ def scan(local_root, dev, budget=None, max_depth=3, crowded=10):
         direct = 0
         with it:
             for entry in it:
+                if is_excluded(entry.path):
+                    continue
                 entries += 1
                 try:
                     st = entry.stat(follow_symlinks=False)

@@ -2,6 +2,7 @@
 
 import os
 import re
+import shlex
 import stat as statmod
 
 from whyfull.checks import check
@@ -12,7 +13,7 @@ from whyfull.walk import allocated
 ROTATED_RE = re.compile(r"(\.(gz|xz|bz2|zst|zip|old)|\.\d+(\.(gz|xz|bz2|zst))?|-\d{8}(\.(gz|xz|bz2|zst))?)$")
 MIN_ROTATED = 200 * 10 ** 6
 BIG_ACTIVE = 1 * 10 ** 9
-SKIP_DIRS = {"journal"}  # handled by the journald check
+SKIP_DIRS = {"journal", "pods", "containers"}  # handled by dedicated checks; containers are pod-log symlinks
 
 
 def walk_logs(ctx, root="/var/log"):
@@ -65,7 +66,7 @@ def run(ctx):
             nbytes, REVIEW, dev,
             detail="Old log archives left behind by logrotate. Keep any you need for audits first.",
             fix=["sudo find /var/log -xdev -type f -regextype posix-extended "
-                 "-regex '.*(\\.(gz|xz|bz2|zst|old)|\\.[0-9]+|-[0-9]{8})$' -delete"],
+                 "-regex '.*(\\.(gz|xz|bz2|zst|zip|old)|\\.[0-9]+|-[0-9]{8})$' -delete"],
             evidence=["%s  %s" % (human(s), p) for s, p in examples[:5]],
         )
 
@@ -76,6 +77,6 @@ def run(ctx):
             detail=("An active log this large usually means log rotation isn't set up for it. "
                     "Truncate it rather than deleting it: deleting a file a service still writes "
                     "to doesn't free the space. Then add a logrotate rule."),
-            fix=["sudo truncate -s 0 %s" % path,
+            fix=["sudo truncate -s 0 %s" % shlex.quote(path),
                  "# then check /etc/logrotate.d/ has a rule covering %s" % os.path.dirname(path)],
         )
