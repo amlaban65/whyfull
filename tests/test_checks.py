@@ -184,12 +184,25 @@ def test_snaps(root, monkeypatch):
 def test_flatpak_runtimes_system_and_per_user(root, monkeypatch):
     monkeypatch.setattr(flatpak, "MIN_BYTES", 20000)
     root.commands[("flatpak", "--version")] = "Flatpak 1.14.6\n"
-    root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x", size=16000)
-    root.write("/home/alice/.local/share/flatpak/runtime/org.kde.Platform/y", size=12000)
-    f, = findings(flatpak.run, make_ctx(root.system()))
+    root.commands[("flatpak", "--system", "list", "--app", "--columns=runtime")] = (
+        "Runtime\norg.gnome.Platform/x86_64/46\n")
+    root.commands[("sudo", "-u", "alice", "-H", "flatpak", "--user", "list", "--app", "--columns=runtime")] = (
+        "Runtime\norg.kde.Platform/x86_64/6.8\norg.shared.Platform/x86_64/1\n")
+    root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x", size=16000)  # referenced: not reclaimable
+    root.write("/var/lib/flatpak/runtime/org.freedesktop.Platform/x", size=16000)
+    # Referenced by an app in the user installation, so don't count it.
+    root.write("/var/lib/flatpak/runtime/org.shared.Platform/x", size=50000)
+    root.write("/home/alice/.local/share/flatpak/runtime/org.kde.Platform/y", size=12000)  # referenced
+    root.write("/home/alice/.local/share/flatpak/runtime/org.freedesktop.Platform/z", size=12000)
+    ctx = make_ctx(root.system())
+    f, = findings(flatpak.run, ctx)
     assert f.fix == ["flatpak uninstall --unused -y",
                      "sudo -u alice -H sh -c 'flatpak uninstall --user --unused -y'"]
     assert f.risk == SAFE
+    assert f.bytes == (
+        ctx.size("/var/lib/flatpak/runtime/org.freedesktop.Platform")
+        + ctx.size("/home/alice/.local/share/flatpak/runtime/org.freedesktop.Platform")
+    )  # only unreferenced runtime IDs are counted
 
 
 def test_crashes(root, monkeypatch):
