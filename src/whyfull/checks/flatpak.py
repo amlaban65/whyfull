@@ -70,11 +70,13 @@ def run(ctx):
         fix = []
         for _size, user, _path in items:
             if user is None:
-                fix.append("flatpak uninstall --unused -y")
+                command = "flatpak uninstall --unused -y"
             elif user == "root":
-                fix.append("flatpak uninstall --user --unused -y")
+                command = "flatpak uninstall --user --unused -y"
             else:
-                fix.append("sudo -u %s -H sh -c 'flatpak uninstall --user --unused -y'" % user)
+                command = "sudo -u %s -H sh -c 'flatpak uninstall --user --unused -y'" % user
+            if command not in fix:
+                fix.append(command)
         yield Finding(
             "flatpak", "runtimes", "Flatpak runtimes", total, SAFE, dev,
             detail=("Runtimes whose IDs are not referenced by installed apps in this installation. "
