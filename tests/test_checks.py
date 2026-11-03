@@ -138,6 +138,7 @@ def test_flatpak_runtimes_system_and_per_user(root, monkeypatch):
         "Runtime\norg.kde.Platform/x86_64/6.8\norg.shared.Platform/x86_64/1\n")
     root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x", size=16000)  # referenced: not reclaimable
     root.write("/var/lib/flatpak/runtime/org.freedesktop.Platform/x", size=16000)
+    root.write("/var/lib/flatpak/runtime/org.gtk.Gtk3theme/x", size=8000)
     # Referenced by an app in the user installation, so don't count it.
     root.write("/var/lib/flatpak/runtime/org.shared.Platform/x", size=50000)
     root.write("/home/alice/.local/share/flatpak/runtime/org.kde.Platform/y", size=12000)  # referenced
@@ -149,6 +150,7 @@ def test_flatpak_runtimes_system_and_per_user(root, monkeypatch):
     assert f.risk == SAFE
     assert f.bytes == (
         ctx.size("/var/lib/flatpak/runtime/org.freedesktop.Platform")
+        + ctx.size("/var/lib/flatpak/runtime/org.gtk.Gtk3theme")
         + ctx.size("/home/alice/.local/share/flatpak/runtime/org.freedesktop.Platform")
     )  # only unreferenced runtime IDs are counted
 
