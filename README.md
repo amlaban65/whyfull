@@ -57,6 +57,7 @@ Run it with `sudo`. Without root it can't measure files owned by other users and
 | `tmp` | Files in `/tmp` and `/var/tmp` nobody has touched in a week. |
 | `user-caches` | pip, uv, poetry, npm, yarn, pnpm, Go, Cargo, Maven, Gradle, ccache, sccache, Playwright, Puppeteer, JetBrains IDE, Hugging Face, PyTorch and conda caches, and the Trash, for every user. |
 | `jenkins` | Workspaces and the largest build histories, including jobs nested in Jenkins folders, with native retention and cleanup guidance. |
+| `ci-runners` | GitHub Actions self-hosted runner workspaces and tool caches; GitLab Runner shell build and cache directories, plus Docker cache volumes, with safe inspection and idle-runner cleanup guidance. |
 | `libvirt` | Disk images not referenced by defined VMs or inspected backing chains. Incomplete inventories produce informational findings, never removal recommendations. |
 | `android` | Per-user emulator data and SDK system images, with Android tooling commands for reviewing and removing selected items. |
 | `mysql` | MySQL and MariaDB binary logs in `/var/lib/mysql`, with the `PURGE BINARY LOGS` and `binlog_expire_logs_seconds` fixes. |

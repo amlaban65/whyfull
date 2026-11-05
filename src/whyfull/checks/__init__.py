@@ -35,6 +35,7 @@ MODULES = [
     "usercaches",
     "android",
     "jenkins",
+    "ci_runners",
     "libvirt",
 ]
 
