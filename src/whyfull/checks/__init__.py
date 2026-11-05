@@ -30,6 +30,7 @@ MODULES = [
     "crashes",
     "mysql",
     "searchdata",
+    "prometheus",
     "postgresql",
     "tmpfiles",
     "usercaches",

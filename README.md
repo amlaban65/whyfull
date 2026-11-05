@@ -62,6 +62,7 @@ Run it with `sudo`. Without root it can't measure files owned by other users and
 | `mysql` | MySQL and MariaDB binary logs in `/var/lib/mysql`, with the `PURGE BINARY LOGS` and `binlog_expire_logs_seconds` fixes. |
 | `postgresql` | PostgreSQL write-ahead logs (`pg_wal`) piling up, with read-only queries to find an inactive replication slot or failing archiver. Informational: WAL is never safe to delete by hand. |
 | `search-data` | Elasticsearch and OpenSearch data sizes, default flood-stage guidance, and API/ILM/ISM investigation. Informational only; no cluster requests or data deletion. |
+| `prometheus` | Default Prometheus TSDB paths, total data and included WAL size, with retention and cardinality investigation. Informational only; never deletes blocks or executes commands. Custom `--storage.tsdb.path` locations are not discovered. |
 | `inodes` | A filesystem that ran out of inodes (too many files) rather than bytes, and the directories with the most entries. |
 | `reserved` | ext filesystems that look full only because of the 5% reserved for root. |
 
