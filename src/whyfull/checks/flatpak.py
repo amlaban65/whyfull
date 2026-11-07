@@ -13,29 +13,54 @@ SYSTEM_APPS = "/var/lib/flatpak/app"
 USER_APPS = ".local/share/flatpak/app"
 
 
-def app_runtimes(system, apps_path):
-    """Return runtime IDs read from installed app metadata, or None if it is incomplete."""
+def metadata_usage(system, metadata, used, extensions):
+    """Add runtime and extension IDs from metadata, or return False if unreadable."""
+    if not system.exists(metadata):
+        return False
+    text = system.read_text(metadata)
+    if text is None:
+        return False
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("[") and line.endswith("]"):
+            section = line[1:-1]
+            if section.startswith("Extension "):
+                extension = section[len("Extension "):].strip()
+                if extension:
+                    extensions.add(extension)
+        elif line.startswith("runtime="):
+            value = line.split("=", 1)[1].strip()
+            if value:
+                used.add(value.split("/", 1)[0])
+    return True
+
+
+def app_runtimes(system, apps_path, used, extensions):
+    """Read runtime and extension IDs from installed app metadata."""
     if not system.exists(apps_path):
-        return set()
-    used = set()
+        return True
     for app in system.listdir(apps_path):
         metadata = os.path.join(apps_path, app, "current", "active", "metadata")
-        if not system.exists(metadata):
-            return None
-        text = system.read_text(metadata)
-        if text is None:
-            return None
-        in_application = False
-        for line in text.splitlines():
-            line = line.strip()
-            if line.startswith("[") and line.endswith("]"):
-                in_application = line[1:-1] == "Application"
-            elif in_application and "=" in line:
-                key, value = line.split("=", 1)
-                if key.strip() == "runtime" and value.strip():
-                    used.add(value.strip().split("/", 1)[0])
-                    break
-    return used
+        used.add(app)
+        if not metadata_usage(system, metadata, used, extensions):
+            return False
+    return True
+
+
+def runtime_metadata(system, runtime_path, used, extensions):
+    """Read extension declarations from installed metadata for used runtimes."""
+    for arch in system.listdir(runtime_path):
+        arch_path = os.path.join(runtime_path, arch)
+        for branch in system.listdir(arch_path):
+            metadata = os.path.join(arch_path, branch, "active", "metadata")
+            if not metadata_usage(system, metadata, used, extensions):
+                return False
+    return True
+
+
+def is_used_runtime(runtime, used, extensions):
+    return (any(runtime == item or runtime.startswith(item + ".") for item in used)
+            or any(runtime.startswith(item) for item in extensions))
 
 
 @check("flatpak", "Unused Flatpak runtimes")
@@ -54,19 +79,30 @@ def run(ctx):
     # An app in one installation may use a runtime from another. Read only the
     # metadata files and take the union before estimating reclaimable space.
     used = set()
+    extensions = set()
     for _user, _path, apps_path in places:
-        runtimes = app_runtimes(ctx.system, apps_path)
-        if runtimes is None:
+        if not app_runtimes(ctx.system, apps_path, used, extensions):
             ctx.note("Could not read Flatpak app metadata; unused-runtime estimates were skipped.")
             return
-        used.update(runtimes)
+    # A runtime's own metadata declares extensions which Flatpak keeps while the
+    # parent runtime is installed. Read those declarations before estimating.
+    for _user, runtime_path, _apps_path in places:
+        if not ctx.system.exists(runtime_path):
+            continue
+        for runtime in ctx.system.listdir(runtime_path):
+            if not any(runtime == item or runtime.startswith(item + ".") for item in used):
+                continue
+            metadata_root = os.path.join(runtime_path, runtime)
+            if not runtime_metadata(ctx.system, metadata_root, used, extensions):
+                ctx.note("Could not read Flatpak runtime metadata; unused-runtime estimates were skipped.")
+                return
 
     groups = {}  # dev -> [total bytes, [(size, user, path)]]
     for user, path, _apps_path in places:
         if not ctx.system.exists(path) or not ctx.on_target(path):
             continue
         for runtime in ctx.system.listdir(path):
-            if runtime in used:
+            if is_used_runtime(runtime, used, extensions):
                 continue
             runtime_path = os.path.join(path, runtime)
             size = ctx.size(runtime_path)
