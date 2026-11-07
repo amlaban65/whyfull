@@ -184,16 +184,32 @@ def test_snaps(root, monkeypatch):
 def test_flatpak_runtimes_system_and_per_user(root, monkeypatch):
     monkeypatch.setattr(flatpak, "MIN_BYTES", 20000)
     root.commands[("flatpak", "--version")] = "Flatpak 1.14.6\n"
-    root.commands[("flatpak", "--system", "list", "--app", "--columns=runtime")] = (
-        "Runtime\norg.gnome.Platform/x86_64/46\n")
-    root.commands[("sudo", "-u", "alice", "-H", "flatpak", "--user", "list", "--app", "--columns=runtime")] = (
-        "Runtime\norg.kde.Platform/x86_64/6.8\norg.shared.Platform/x86_64/1\n")
+    root.write("/var/lib/flatpak/app/org.example.System/current/active/metadata",
+               "[Application]\nname=System app\nruntime=org.gnome.Platform/x86_64/46\n"
+               "[Extension org.example.System.Locale]\n")
+    root.write("/home/alice/.local/share/flatpak/app/org.example.User/current/active/metadata",
+               "[Application]\nname=User app\nruntime=org.kde.Platform/x86_64/6.8\n"
+               "[Extension org.example.User.Locale]\n")
+    root.write("/home/alice/.local/share/flatpak/app/org.example.Shared/current/active/metadata",
+               "[Application]\nname=Shared app\nruntime=org.shared.Platform/x86_64/1\n")
+    root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x86_64/46/active/metadata",
+               "[Runtime]\nname=GNOME Platform\n"
+               "[Extension org.freedesktop.Platform.GL.default]\n"
+               "[Extension org.freedesktop.Platform.Locale]\n")
+    root.write("/home/alice/.local/share/flatpak/runtime/org.kde.Platform/x86_64/6.8/active/metadata",
+               "[Runtime]\nname=KDE Platform\n"
+               "[Extension org.kde.Platform.Locale]\n")
     root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x", size=16000)  # referenced: not reclaimable
+    root.write("/var/lib/flatpak/runtime/org.example.System.Locale/x", size=9000)
+    root.write("/var/lib/flatpak/runtime/org.example.User.Locale/x", size=9000)
+    root.write("/var/lib/flatpak/runtime/org.freedesktop.Platform.GL.default.nvidia/x", size=9000)
+    root.write("/var/lib/flatpak/runtime/org.freedesktop.Platform.Locale/x", size=9000)
     root.write("/var/lib/flatpak/runtime/org.freedesktop.Platform/x", size=16000)
     root.write("/var/lib/flatpak/runtime/org.gtk.Gtk3theme/x", size=8000)
     # Referenced by an app in the user installation, so don't count it.
     root.write("/var/lib/flatpak/runtime/org.shared.Platform/x", size=50000)
     root.write("/home/alice/.local/share/flatpak/runtime/org.kde.Platform/y", size=12000)  # referenced
+    root.write("/home/alice/.local/share/flatpak/runtime/org.kde.Platform.Locale/y", size=9000)
     root.write("/home/alice/.local/share/flatpak/runtime/org.freedesktop.Platform/z", size=12000)
     ctx = make_ctx(root.system())
     f, = findings(flatpak.run, ctx)
