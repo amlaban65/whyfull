@@ -16,6 +16,7 @@ CACHES = [
     (".npm/_cacache", "npm cache", "npm cache clean --force", SAFE),
     (".cache/yarn", "Yarn cache", "yarn cache clean", SAFE),
     (".local/share/pnpm/store", "pnpm store", "pnpm store prune", SAFE),
+    (".cache/deno", "Deno cache", 'DENO_DIR="$HOME/.cache/deno" deno clean', SAFE),
     (".cache/go-build", "Go build cache", "go clean -cache", SAFE),
     (".cache/ccache", "ccache cache", 'CCACHE_DIR="$HOME/.cache/ccache" ccache -C', SAFE),
     (".ccache", "ccache legacy cache", 'CCACHE_DIR="$HOME/.ccache" ccache -C', SAFE),

@@ -391,3 +391,38 @@ def test_postgresql_respects_separate_wal_filesystem(root, monkeypatch):
     assert findings(postgresql.run, make_ctx(system)) == []
     f, = findings(postgresql.run, make_ctx(system, mountpoint=path))
     assert f.dev == system.lstat(path).st_dev
+
+
+def test_deno_cache_grouped_across_users(root, monkeypatch):
+    monkeypatch.setattr(usercaches, "MIN_BYTES", 20000)
+    root.write("/home/alice/.cache/deno/npm/pkg", size=16000)
+    root.write("/root/.cache/deno/remote/module", size=12000)
+    ctx = make_ctx(root.system())
+    found = [f for f in usercaches.run(ctx) if f.key == "Deno cache"]
+    assert len(found) == 1
+    assert found[0].bytes == (ctx.size("/home/alice/.cache/deno")
+                              + ctx.size("/root/.cache/deno"))
+    assert found[0].risk == SAFE
+    command = 'DENO_DIR="$HOME/.cache/deno" deno clean'
+    assert found[0].fix == ["sudo -u alice -H sh -c '%s'" % command, command]
+
+
+def test_deno_cache_ignores_small_and_missing_directories(root, monkeypatch):
+    monkeypatch.setattr(usercaches, "MIN_BYTES", 20000)
+    assert not any(f.key == "Deno cache" for f in usercaches.run(make_ctx(root.system())))
+    root.write("/home/alice/.cache/deno/module", size=1000)
+    assert not any(f.key == "Deno cache" for f in usercaches.run(make_ctx(root.system())))
+
+
+def test_deno_cache_respects_selected_filesystem(root, monkeypatch):
+    monkeypatch.setattr(usercaches, "MIN_BYTES", 20000)
+    path = "/home/alice/.cache/deno"
+    root.mounts.append(("/home", "ext4", "/dev/sdb1"))
+    root.write(path + "/npm/pkg", size=30000)
+    system = root.system()
+    assert not any(f.key == "Deno cache" for f in usercaches.run(make_ctx(system)))
+    ctx = make_ctx(system, mountpoint="/home")
+    found = [f for f in usercaches.run(ctx) if f.key == "Deno cache"]
+    assert len(found) == 1
+    assert found[0].bytes == ctx.size(path)
+    assert found[0].dev == ctx.dev_of(path)
