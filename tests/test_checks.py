@@ -391,3 +391,36 @@ def test_postgresql_respects_separate_wal_filesystem(root, monkeypatch):
     assert findings(postgresql.run, make_ctx(system)) == []
     f, = findings(postgresql.run, make_ctx(system, mountpoint=path))
     assert f.dev == system.lstat(path).st_dev
+
+
+def test_bazel_cache_grouped_with_review_guidance(root, monkeypatch):
+    monkeypatch.setattr(usercaches, "MIN_BYTES", 20000)
+    root.write("/home/alice/.cache/bazel/output/artifact", size=16000)
+    root.write("/root/.cache/bazel/output/artifact", size=12000)
+    found = findings(usercaches.run, make_ctx(root.system()))
+    assert [f.key for f in found] == ["Bazel cache"]
+    assert found[0].risk == REVIEW
+    assert len(found[0].evidence) == 2
+    assert "bazel clean --expunge" in found[0].fix[0]
+    assert "each workspace" in found[0].fix[0]
+
+
+def test_bazel_cache_skips_missing_and_small_directories(root, monkeypatch):
+    monkeypatch.setattr(usercaches, "MIN_BYTES", 20000)
+    assert findings(usercaches.run, make_ctx(root.system())) == []
+    root.write("/home/alice/.cache/bazel/output/artifact", size=1000)
+    assert findings(usercaches.run, make_ctx(root.system())) == []
+
+
+def test_bazel_cache_respects_selected_filesystem(root, monkeypatch):
+    monkeypatch.setattr(usercaches, "MIN_BYTES", 20000)
+    path = "/home/alice/.cache/bazel"
+    root.write(path + "/output/artifact", size=50000)
+    root.mounts.append((path, "ext4", "/dev/sdb1"))
+    system = root.system()
+    assert findings(usercaches.run, make_ctx(system)) == []
+    ctx = make_ctx(system, mountpoint=path)
+    f, = findings(usercaches.run, ctx)
+    assert f.key == "Bazel cache"
+    assert f.dev == system.lstat(path).st_dev
+    assert f.bytes == ctx.size(path)

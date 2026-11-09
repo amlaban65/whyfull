@@ -19,6 +19,8 @@ CACHES = [
     (".cache/go-build", "Go build cache", "go clean -cache", SAFE),
     (".cache/ccache", "ccache cache", 'CCACHE_DIR="$HOME/.cache/ccache" ccache -C', SAFE),
     (".ccache", "ccache legacy cache", 'CCACHE_DIR="$HOME/.ccache" ccache -C', SAFE),
+    (".cache/bazel", "Bazel cache",
+     "bazel clean --expunge  # run in each workspace only when no builds are running", REVIEW),
     (".cache/sccache", "sccache cache", "rm -rf ~/.cache/sccache", SAFE),
     (".cache/ms-playwright", "Playwright browsers", "npx playwright uninstall --all", SAFE),
     (".cache/puppeteer", "Puppeteer browsers", "rm -rf ~/.cache/puppeteer", SAFE),
