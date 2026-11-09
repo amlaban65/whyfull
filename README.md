@@ -55,7 +55,7 @@ Run it with `sudo`. Without root it can't measure files owned by other users and
 | `snaps` | Disabled snap revisions that snapd keeps around. |
 | `crashes` | Core dumps from systemd-coredump, apport and ABRT, and `/var/crash`. |
 | `tmp` | Files in `/tmp` and `/var/tmp` nobody has touched in a week. |
-| `user-caches` | pip, uv, poetry, npm, yarn, pnpm, Go, Cargo, Maven, Gradle, ccache, sccache, Playwright, Puppeteer, JetBrains IDE, Hugging Face, PyTorch and conda caches, and the Trash, for every user. |
+| `user-caches` | pip, uv, poetry, npm, yarn, pnpm, Go, Cargo, Maven, Gradle, ccache, sccache, Bazel, Playwright, Puppeteer, JetBrains IDE, Hugging Face, PyTorch and conda caches, and the Trash, for every user. |
 | `jenkins` | Workspaces and the largest build histories, including jobs nested in Jenkins folders, with native retention and cleanup guidance. |
 | `libvirt` | Disk images not referenced by defined VMs or inspected backing chains. Incomplete inventories produce informational findings, never removal recommendations. |
 | `android` | Per-user emulator data and SDK system images, with Android tooling commands for reviewing and removing selected items. |

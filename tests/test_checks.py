@@ -391,3 +391,15 @@ def test_postgresql_respects_separate_wal_filesystem(root, monkeypatch):
     assert findings(postgresql.run, make_ctx(system)) == []
     f, = findings(postgresql.run, make_ctx(system, mountpoint=path))
     assert f.dev == system.lstat(path).st_dev
+
+
+def test_bazel_cache_grouped_with_review_guidance(root, monkeypatch):
+    monkeypatch.setattr(usercaches, "MIN_BYTES", 20000)
+    root.write("/home/alice/.cache/bazel/output/artifact", size=16000)
+    root.write("/root/.cache/bazel/output/artifact", size=12000)
+    found = findings(usercaches.run, make_ctx(root.system()))
+    assert [f.key for f in found] == ["Bazel cache"]
+    assert found[0].risk == REVIEW
+    assert len(found[0].evidence) == 2
+    assert "bazel clean --expunge" in found[0].fix[0]
+    assert "each workspace" in found[0].fix[0]

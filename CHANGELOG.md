@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- `user-caches`: detect the default Bazel cache across users, with per-workspace cleanup guidance marked for review.
+
 ## 0.2.0
 
 New checks, all contributed:
