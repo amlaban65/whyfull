@@ -27,6 +27,7 @@ MODULES = [
     "packages",
     "kernels",
     "snaps",
+    "flatpak",
     "crashes",
     "mysql",
     "searchdata",

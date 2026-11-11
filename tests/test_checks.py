@@ -7,7 +7,7 @@ import pytest
 
 from conftest import make_ctx
 
-from whyfull.checks import containers, crashes, deleted_open, journald, kernels, logs, packages, snaps
+from whyfull.checks import containers, crashes, deleted_open, flatpak, journald, kernels, logs, packages, snaps
 from whyfull.checks import mysql, postgresql, space, tmpfiles, usercaches
 from whyfull.model import CAUTION, INFO, REVIEW, SAFE, Filesystem
 from whyfull.system import System
@@ -179,6 +179,81 @@ def test_snaps(root, monkeypatch):
     f, = findings(snaps.run, make_ctx(root.system()))
     assert f.fix[0] == "sudo snap remove core22 --revision=1564"
     assert f.risk == SAFE
+
+
+def test_flatpak_runtimes_system_and_per_user(root, monkeypatch):
+    monkeypatch.setattr(flatpak, "MIN_BYTES", 20000)
+    root.commands[("flatpak", "--version")] = "Flatpak 1.14.6\n"
+    root.write("/var/lib/flatpak/app/org.example.System/current/active/metadata",
+               "[Application]\nname=System app\nruntime=org.gnome.Platform/x86_64/46\n"
+               "[Extension org.example.System.Locale]\n")
+    root.write("/home/alice/.local/share/flatpak/app/org.example.User/current/active/metadata",
+               "[Application]\nname=User app\nruntime=org.kde.Platform/x86_64/6.8\n"
+               "[Extension org.example.User.Locale]\n")
+    root.write("/home/alice/.local/share/flatpak/app/org.example.Shared/current/active/metadata",
+               "[Application]\nname=Shared app\nruntime=org.shared.Platform/x86_64/1\n")
+    root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x86_64/46/active/metadata",
+               "[Runtime]\nname=GNOME Platform\n"
+               "[Extension org.freedesktop.Platform.GL.default]\n"
+               "[Extension org.freedesktop.Platform.Locale]\n")
+    root.write("/home/alice/.local/share/flatpak/runtime/org.kde.Platform/x86_64/6.8/active/metadata",
+               "[Runtime]\nname=KDE Platform\n"
+               "[Extension org.kde.Platform.Locale]\n")
+    root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x", size=16000)  # referenced: not reclaimable
+    root.write("/var/lib/flatpak/runtime/org.example.System.Locale/x", size=9000)
+    root.write("/var/lib/flatpak/runtime/org.example.User.Locale/x", size=9000)
+    root.write("/var/lib/flatpak/runtime/org.freedesktop.Platform.GL.default.nvidia/x", size=9000)
+    root.write("/var/lib/flatpak/runtime/org.freedesktop.Platform.Locale/x", size=9000)
+    root.write("/var/lib/flatpak/runtime/org.freedesktop.Platform/x", size=16000)
+    root.write("/var/lib/flatpak/runtime/org.gtk.Gtk3theme/x", size=8000)
+    # Referenced by an app in the user installation, so don't count it.
+    root.write("/var/lib/flatpak/runtime/org.shared.Platform/x", size=50000)
+    root.write("/home/alice/.local/share/flatpak/runtime/org.kde.Platform/y", size=12000)  # referenced
+    root.write("/home/alice/.local/share/flatpak/runtime/org.kde.Platform.Locale/y", size=9000)
+    root.write("/home/alice/.local/share/flatpak/runtime/org.freedesktop.Platform/z", size=12000)
+    ctx = make_ctx(root.system())
+    f, = findings(flatpak.run, ctx)
+    assert f.fix == ["flatpak uninstall --unused -y",
+                     "sudo -u alice -H sh -c 'flatpak uninstall --user --unused -y'"]
+    assert f.risk == SAFE
+    assert f.bytes == (
+        ctx.size("/var/lib/flatpak/runtime/org.freedesktop.Platform")
+        + ctx.size("/var/lib/flatpak/runtime/org.gtk.Gtk3theme")
+        + ctx.size("/home/alice/.local/share/flatpak/runtime/org.freedesktop.Platform")
+    )  # only unreferenced runtime IDs are counted
+
+
+def test_flatpak_extensions_of_used_runtime_not_reported(root, monkeypatch):
+    monkeypatch.setattr(flatpak, "MIN_BYTES", 20000)
+    root.commands[("flatpak", "--version")] = "Flatpak 1.14.6\n"
+    root.write("/var/lib/flatpak/app/org.example.App/current/active/metadata",
+               "[Application]\nruntime=org.gnome.Platform/x86_64/46\n"
+               "[Extension org.example.App.Locale]\n")
+    root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x86_64/46/active/metadata",
+               "[Runtime]\n[Extension org.freedesktop.Platform.GL.default]\n"
+               "[Extension org.gnome.Platform.Locale]\n")
+    root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x", size=16000)
+    root.write("/var/lib/flatpak/runtime/org.freedesktop.Platform.GL.default.nvidia-535/x", size=9000)
+    root.write("/var/lib/flatpak/runtime/org.gnome.Platform.Locale/x", size=9000)
+    root.write("/var/lib/flatpak/runtime/org.example.App.Locale/x", size=9000)
+    root.write("/var/lib/flatpak/runtime/org.old.Platform/x", size=30000)  # unused
+    ctx = make_ctx(root.system())
+    f, = findings(flatpak.run, ctx)
+    assert f.fix == ["flatpak uninstall --unused -y"]
+    assert f.bytes == ctx.size("/var/lib/flatpak/runtime/org.old.Platform")
+    assert len(f.evidence) == 1 and "org.old.Platform" in f.evidence[0]
+
+
+def test_flatpak_absent_reports_nothing(root, monkeypatch):
+    monkeypatch.setattr(flatpak, "MIN_BYTES", 20000)
+    root.write("/var/lib/flatpak/runtime/org.old.Platform/x", size=30000)  # would be unused
+    assert findings(flatpak.run, make_ctx(root.system())) == []
+
+
+def test_flatpak_total_under_floor_reports_nothing(root):
+    root.commands[("flatpak", "--version")] = "Flatpak 1.14.6\n"
+    root.write("/var/lib/flatpak/runtime/org.old.Platform/x", size=9000)  # well under 200 MB
+    assert findings(flatpak.run, make_ctx(root.system())) == []
 
 
 def test_crashes(root, monkeypatch):
