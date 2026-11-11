@@ -223,6 +223,39 @@ def test_flatpak_runtimes_system_and_per_user(root, monkeypatch):
     )  # only unreferenced runtime IDs are counted
 
 
+def test_flatpak_extensions_of_used_runtime_not_reported(root, monkeypatch):
+    monkeypatch.setattr(flatpak, "MIN_BYTES", 20000)
+    root.commands[("flatpak", "--version")] = "Flatpak 1.14.6\n"
+    root.write("/var/lib/flatpak/app/org.example.App/current/active/metadata",
+               "[Application]\nruntime=org.gnome.Platform/x86_64/46\n"
+               "[Extension org.example.App.Locale]\n")
+    root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x86_64/46/active/metadata",
+               "[Runtime]\n[Extension org.freedesktop.Platform.GL.default]\n"
+               "[Extension org.gnome.Platform.Locale]\n")
+    root.write("/var/lib/flatpak/runtime/org.gnome.Platform/x", size=16000)
+    root.write("/var/lib/flatpak/runtime/org.freedesktop.Platform.GL.default.nvidia-535/x", size=9000)
+    root.write("/var/lib/flatpak/runtime/org.gnome.Platform.Locale/x", size=9000)
+    root.write("/var/lib/flatpak/runtime/org.example.App.Locale/x", size=9000)
+    root.write("/var/lib/flatpak/runtime/org.old.Platform/x", size=30000)  # unused
+    ctx = make_ctx(root.system())
+    f, = findings(flatpak.run, ctx)
+    assert f.fix == ["flatpak uninstall --unused -y"]
+    assert f.bytes == ctx.size("/var/lib/flatpak/runtime/org.old.Platform")
+    assert len(f.evidence) == 1 and "org.old.Platform" in f.evidence[0]
+
+
+def test_flatpak_absent_reports_nothing(root, monkeypatch):
+    monkeypatch.setattr(flatpak, "MIN_BYTES", 20000)
+    root.write("/var/lib/flatpak/runtime/org.old.Platform/x", size=30000)  # would be unused
+    assert findings(flatpak.run, make_ctx(root.system())) == []
+
+
+def test_flatpak_total_under_floor_reports_nothing(root):
+    root.commands[("flatpak", "--version")] = "Flatpak 1.14.6\n"
+    root.write("/var/lib/flatpak/runtime/org.old.Platform/x", size=9000)  # well under 200 MB
+    assert findings(flatpak.run, make_ctx(root.system())) == []
+
+
 def test_crashes(root, monkeypatch):
     monkeypatch.setattr(crashes, "MIN_BYTES", 1000)
     root.write("/var/crash/_usr_bin_x.crash", size=5000)
