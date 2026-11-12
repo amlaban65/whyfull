@@ -18,6 +18,7 @@ REGISTRY = []
 MODULES = [
     "deleted_open",
     "space",
+    "snapshots",
     "journald",
     "logs",
     "podlogs",

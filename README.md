@@ -64,8 +64,9 @@ Run it with `sudo`. Without root it can't measure files owned by other users and
 | `search-data` | Elasticsearch and OpenSearch data sizes, default flood-stage guidance, and API/ILM/ISM investigation. Informational only; no cluster requests or data deletion. |
 | `inodes` | A filesystem that ran out of inodes (too many files) rather than bytes, and the directories with the most entries. |
 | `reserved` | ext filesystems that look full only because of the 5% reserved for root. |
+| `snapshots` | ZFS snapshot-held bytes and the largest snapshots; Btrfs snapshot counts without estimating exclusive usage from subvolume listings. Deletion guidance is explicitly cautious. |
 
-whyfull also scans the whole filesystem (with a time limit) and lists the largest directories. When the files it can see add up to much less than `df` reports, it says so, and points to where the rest usually is. Common causes are files hidden underneath a mount point and btrfs or ZFS snapshots.
+whyfull also scans the whole filesystem (with a time limit) and lists the largest directories. When the files it can see add up to much less than `df` reports, it says so, and points to where the rest usually is. Common causes are files hidden underneath a mount point and btrfs or ZFS snapshots; the `snapshots` check measures ZFS snapshot-held bytes and counts Btrfs snapshots.
 
 `whyfull --list-checks` prints the list from your installed version.
 
